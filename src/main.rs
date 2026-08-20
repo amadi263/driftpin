@@ -1,5 +1,5 @@
 mod model;
-
+mod parsers;
 use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(

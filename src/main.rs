@@ -4,8 +4,10 @@ mod rules;
 
 use clap::{Parser, Subcommand};
 use model::{Role, Runtime};
-use parsers::{nvmrc::parse_nvmrc, package_json::parse_package_json};
-use rules::development_outside_support;
+use parsers::{
+    node_version::parse_node_version, nvmrc::parse_nvmrc, package_json::parse_package_json,
+};
+use rules::{development_declarations_conflict, development_outside_support};
 use std::{fs, process};
 
 #[derive(Parser)]
@@ -86,6 +88,20 @@ fn run_check() -> Result<bool, String> {
         }
     }
 
+    let node_version_path = ".node-version";
+
+    match fs::read_to_string(node_version_path) {
+        Ok(contents) => {
+            if let Some(declaration) = parse_node_version(&contents, node_version_path) {
+                declarations.push(declaration);
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!("Failed to read {node_version_path}: {error}"));
+        }
+    }
+
     if declarations.is_empty() {
         println!("No runtime declarations found.");
         return Ok(false);
@@ -100,6 +116,8 @@ fn run_check() -> Result<bool, String> {
         println!("  constraint: {}", declaration.constraint);
         println!("  role: {:?}", declaration.role);
     }
+
+    let mut has_issues = false;
 
     if development_outside_support(&declarations)? {
         let support = declarations.iter().find(|declaration| {
@@ -122,11 +140,29 @@ fn run_check() -> Result<bool, String> {
             );
         }
 
-        return Ok(true);
+        has_issues = true;
     }
 
-    println!();
-    println!("No runtime contract issues found.");
+    if development_declarations_conflict(&declarations)? {
+        println!();
+        println!("DP002 Conflicting development runtime declarations");
 
-    Ok(false)
+        for declaration in declarations.iter().filter(|declaration| {
+            declaration.runtime == Runtime::Node && declaration.role == Role::Development
+        }) {
+            println!(
+                "{} selects Node {}",
+                declaration.source, declaration.constraint
+            );
+        }
+
+        has_issues = true;
+    }
+
+    if !has_issues {
+        println!();
+        println!("No runtime contract issues found.");
+    }
+
+    Ok(has_issues)
 }

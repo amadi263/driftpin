@@ -3,11 +3,13 @@ mod parsers;
 mod rules;
 mod scanner;
 
+use crate::rules::development_and_shipped_conflict;
 use crate::rules::development_and_test_conflict;
 use clap::{Parser, Subcommand};
 use model::{Role, Runtime};
 use parsers::{
-    node_version::parse_node_version, nvmrc::parse_nvmrc, package_json::parse_package_json,
+    dockerfile::parse_dockerfile, node_version::parse_node_version, nvmrc::parse_nvmrc,
+    package_json::parse_package_json,
 };
 use rules::{development_declarations_conflict, development_outside_support};
 use scanner::scan_github_actions_workflows;
@@ -105,6 +107,18 @@ fn run_check() -> Result<bool, String> {
         }
     }
 
+    let dockerfile_path = "Dockerfile";
+
+    match fs::read_to_string(dockerfile_path) {
+        Ok(contents) => {
+            declarations.extend(parse_dockerfile(&contents, dockerfile_path));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!("Failed to read {dockerfile_path}: {error}"));
+        }
+    }
+
     declarations.extend(scan_github_actions_workflows(".github/workflows")?);
 
     if declarations.is_empty() {
@@ -182,6 +196,31 @@ fn run_check() -> Result<bool, String> {
         }) {
             println!(
                 "{} tests Node {}",
+                declaration.source, declaration.constraint
+            );
+        }
+
+        has_issues = true;
+    }
+
+    if development_and_shipped_conflict(&declarations)? {
+        println!();
+        println!("DP004 Development and shipped runtimes conflict");
+
+        for declaration in declarations.iter().filter(|declaration| {
+            declaration.runtime == Runtime::Node && declaration.role == Role::Development
+        }) {
+            println!(
+                "{} selects Node {}",
+                declaration.source, declaration.constraint
+            );
+        }
+
+        for declaration in declarations.iter().filter(|declaration| {
+            declaration.runtime == Runtime::Node && declaration.role == Role::Shipped
+        }) {
+            println!(
+                "{} ships Node {}",
                 declaration.source, declaration.constraint
             );
         }

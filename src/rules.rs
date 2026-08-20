@@ -106,6 +106,57 @@ pub fn development_and_test_conflict(declarations: &[Declaration]) -> Result<boo
     Ok(false)
 }
 
+pub fn development_and_shipped_conflict(declarations: &[Declaration]) -> Result<bool, String> {
+    let developments: Vec<&Declaration> = declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.runtime == Runtime::Node && declaration.role == Role::Development
+        })
+        .collect();
+
+    let shipped: Vec<&Declaration> = declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.runtime == Runtime::Node && declaration.role == Role::Shipped
+        })
+        .collect();
+
+    if developments.is_empty() || shipped.is_empty() {
+        return Ok(false);
+    }
+
+    for development in developments {
+        let development_range: Range = development.constraint.parse().map_err(|error| {
+            format!(
+                "Invalid development range in {}: {error}",
+                development.source
+            )
+        })?;
+
+        let mut compatible = false;
+
+        for shipped_runtime in &shipped {
+            let shipped_range: Range = shipped_runtime.constraint.parse().map_err(|error| {
+                format!(
+                    "Invalid shipped range in {}: {error}",
+                    shipped_runtime.source
+                )
+            })?;
+
+            if development_range.intersect(&shipped_range).is_some() {
+                compatible = true;
+                break;
+            }
+        }
+
+        if !compatible {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,5 +260,46 @@ mod tests {
         ];
 
         assert!(!development_and_test_conflict(&declarations).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod shipped_tests {
+    use super::*;
+
+    fn declaration(constraint: &str, role: Role, source: &str) -> Declaration {
+        Declaration {
+            runtime: Runtime::Node,
+            constraint: constraint.to_string(),
+            role,
+            source: source.to_string(),
+        }
+    }
+
+    #[test]
+    fn detects_development_and_shipped_conflict() {
+        let declarations = vec![
+            declaration("22", Role::Development, ".nvmrc"),
+            declaration("18", Role::Shipped, "Dockerfile"),
+        ];
+
+        assert!(development_and_shipped_conflict(&declarations).unwrap());
+    }
+
+    #[test]
+    fn accepts_matching_development_and_shipped_versions() {
+        let declarations = vec![
+            declaration("22", Role::Development, ".nvmrc"),
+            declaration("22", Role::Shipped, "Dockerfile"),
+        ];
+
+        assert!(!development_and_shipped_conflict(&declarations).unwrap());
+    }
+
+    #[test]
+    fn shipped_rule_does_nothing_without_container_runtime() {
+        let declarations = vec![declaration("22", Role::Development, ".nvmrc")];
+
+        assert!(!development_and_shipped_conflict(&declarations).unwrap());
     }
 }

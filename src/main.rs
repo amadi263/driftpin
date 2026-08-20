@@ -2,7 +2,7 @@ mod model;
 mod parsers;
 
 use clap::{Parser, Subcommand};
-use parsers::package_json::parse_package_json;
+use parsers::{nvmrc::parse_nvmrc, package_json::parse_package_json};
 use std::{fs, process};
 
 #[derive(Parser)]
@@ -46,32 +46,51 @@ fn main() {
 }
 
 fn run_check() -> Result<(), String> {
-    let path = "package.json";
+    let mut declarations = Vec::new();
 
-    let contents = match fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            println!("No package.json found.");
-            return Ok(());
+    let package_path = "package.json";
+
+    match fs::read_to_string(package_path) {
+        Ok(contents) => {
+            if let Some(declaration) = parse_package_json(&contents, package_path)
+                .map_err(|error| format!("Failed to parse {package_path}: {error}"))?
+            {
+                declarations.push(declaration);
+            }
         }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
-            return Err(format!("Failed to read {path}: {error}"));
+            return Err(format!("Failed to read {package_path}: {error}"));
         }
-    };
+    }
 
-    match parse_package_json(&contents, path)
-        .map_err(|error| format!("Failed to parse {path}: {error}"))?
-    {
-        Some(declaration) => {
-            println!("Found runtime declaration:");
-            println!("  source: {}", declaration.source);
-            println!("  runtime: {:?}", declaration.runtime);
-            println!("  constraint: {}", declaration.constraint);
-            println!("  role: {:?}", declaration.role);
+    let nvmrc_path = ".nvmrc";
+
+    match fs::read_to_string(nvmrc_path) {
+        Ok(contents) => {
+            if let Some(declaration) = parse_nvmrc(&contents, nvmrc_path) {
+                declarations.push(declaration);
+            }
         }
-        None => {
-            println!("No Node.js runtime declaration found in package.json.");
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!("Failed to read {nvmrc_path}: {error}"));
         }
+    }
+
+    if declarations.is_empty() {
+        println!("No runtime declarations found.");
+        return Ok(());
+    }
+
+    println!("Found runtime declarations:");
+
+    for declaration in declarations {
+        println!();
+        println!("  source: {}", declaration.source);
+        println!("  runtime: {:?}", declaration.runtime);
+        println!("  constraint: {}", declaration.constraint);
+        println!("  role: {:?}", declaration.role);
     }
 
     Ok(())

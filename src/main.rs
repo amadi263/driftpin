@@ -7,6 +7,7 @@ use crate::rules::development_and_shipped_conflict;
 use crate::rules::development_and_test_conflict;
 use clap::{Parser, Subcommand};
 use model::{Role, Runtime};
+use parsers::python_version::parse_python_version;
 use parsers::{
     dockerfile::parse_dockerfile, node_version::parse_node_version, nvmrc::parse_nvmrc,
     package_json::parse_package_json,
@@ -104,6 +105,20 @@ fn run_check() -> Result<bool, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
             return Err(format!("Failed to read {node_version_path}: {error}"));
+        }
+    }
+
+    let python_version_path = ".python-version";
+
+    match fs::read_to_string(python_version_path) {
+        Ok(contents) => {
+            if let Some(declaration) = parse_python_version(&contents, python_version_path) {
+                declarations.push(declaration);
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!("Failed to read {python_version_path}: {error}"));
         }
     }
 

@@ -1,5 +1,6 @@
 mod model;
 mod parsers;
+mod python_rules;
 mod rules;
 mod scanner;
 
@@ -7,11 +8,13 @@ use crate::rules::development_and_shipped_conflict;
 use crate::rules::development_and_test_conflict;
 use clap::{Parser, Subcommand};
 use model::{Role, Runtime};
+use parsers::pyproject_toml::parse_pyproject_toml;
 use parsers::python_version::parse_python_version;
 use parsers::{
     dockerfile::parse_dockerfile, node_version::parse_node_version, nvmrc::parse_nvmrc,
     package_json::parse_package_json,
 };
+use python_rules::python_development_outside_support;
 use rules::{development_declarations_conflict, development_outside_support};
 use scanner::scan_github_actions_workflows;
 use std::{fs, process};
@@ -105,6 +108,22 @@ fn run_check() -> Result<bool, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
             return Err(format!("Failed to read {node_version_path}: {error}"));
+        }
+    }
+
+    let pyproject_path = "pyproject.toml";
+
+    match fs::read_to_string(pyproject_path) {
+        Ok(contents) => {
+            if let Some(declaration) = parse_pyproject_toml(&contents, pyproject_path)
+                .map_err(|error| format!("Failed to parse {pyproject_path}: {error}"))?
+            {
+                declarations.push(declaration);
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!("Failed to read {pyproject_path}: {error}"));
         }
     }
 
@@ -237,6 +256,30 @@ fn run_check() -> Result<bool, String> {
             println!(
                 "{} ships Node {}",
                 declaration.source, declaration.constraint
+            );
+        }
+
+        has_issues = true;
+    }
+
+    if python_development_outside_support(&declarations)? {
+        println!();
+        println!("DP005 Python development runtime is outside supported range");
+
+        let support = declarations.iter().find(|declaration| {
+            declaration.runtime == Runtime::Python && declaration.role == Role::Support
+        });
+
+        let development = declarations.iter().find(|declaration| {
+            declaration.runtime == Runtime::Python && declaration.role == Role::Development
+        });
+
+        if let (Some(support), Some(development)) = (support, development) {
+            println!();
+            println!("{} declares Python {}", support.source, support.constraint);
+            println!(
+                "{} selects Python {}",
+                development.source, development.constraint
             );
         }
 

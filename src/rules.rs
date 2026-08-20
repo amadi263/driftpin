@@ -57,6 +57,55 @@ pub fn development_declarations_conflict(declarations: &[Declaration]) -> Result
     Ok(false)
 }
 
+pub fn development_and_test_conflict(declarations: &[Declaration]) -> Result<bool, String> {
+    let developments: Vec<&Declaration> = declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.runtime == Runtime::Node && declaration.role == Role::Development
+        })
+        .collect();
+
+    let tests: Vec<&Declaration> = declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.runtime == Runtime::Node && declaration.role == Role::Test
+        })
+        .collect();
+
+    if developments.is_empty() || tests.is_empty() {
+        return Ok(false);
+    }
+
+    for development in developments {
+        let development_range: Range = development.constraint.parse().map_err(|error| {
+            format!(
+                "Invalid development range in {}: {error}",
+                development.source
+            )
+        })?;
+
+        let mut compatible_with_ci = false;
+
+        for test in &tests {
+            let test_range: Range = test
+                .constraint
+                .parse()
+                .map_err(|error| format!("Invalid test range in {}: {error}", test.source))?;
+
+            if development_range.intersect(&test_range).is_some() {
+                compatible_with_ci = true;
+                break;
+            }
+        }
+
+        if !compatible_with_ci {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,5 +171,43 @@ mod tests {
         let declarations = vec![declaration("22", Role::Development, ".nvmrc")];
 
         assert!(!development_declarations_conflict(&declarations).unwrap());
+    }
+
+    #[test]
+    fn detects_development_and_ci_conflict() {
+        let declarations = vec![
+            declaration("22", Role::Development, ".nvmrc"),
+            declaration("18", Role::Test, ".github/workflows/ci.yml"),
+        ];
+
+        assert!(development_and_test_conflict(&declarations).unwrap());
+    }
+
+    #[test]
+    fn accepts_matching_development_and_ci_versions() {
+        let declarations = vec![
+            declaration("22", Role::Development, ".nvmrc"),
+            declaration("22", Role::Test, ".github/workflows/ci.yml"),
+        ];
+
+        assert!(!development_and_test_conflict(&declarations).unwrap());
+    }
+
+    #[test]
+    fn ci_rule_does_nothing_without_ci_declaration() {
+        let declarations = vec![declaration("22", Role::Development, ".nvmrc")];
+
+        assert!(!development_and_test_conflict(&declarations).unwrap());
+    }
+
+    #[test]
+    fn accepts_when_one_ci_matrix_version_matches_development() {
+        let declarations = vec![
+            declaration("22", Role::Development, ".nvmrc"),
+            declaration("20", Role::Test, ".github/workflows/ci.yml"),
+            declaration("22", Role::Test, ".github/workflows/ci.yml"),
+        ];
+
+        assert!(!development_and_test_conflict(&declarations).unwrap());
     }
 }

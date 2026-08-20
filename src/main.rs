@@ -1,13 +1,16 @@
 mod model;
 mod parsers;
 mod rules;
+mod scanner;
 
+use crate::rules::development_and_test_conflict;
 use clap::{Parser, Subcommand};
 use model::{Role, Runtime};
 use parsers::{
     node_version::parse_node_version, nvmrc::parse_nvmrc, package_json::parse_package_json,
 };
 use rules::{development_declarations_conflict, development_outside_support};
+use scanner::scan_github_actions_workflows;
 use std::{fs, process};
 
 #[derive(Parser)]
@@ -102,6 +105,8 @@ fn run_check() -> Result<bool, String> {
         }
     }
 
+    declarations.extend(scan_github_actions_workflows(".github/workflows")?);
+
     if declarations.is_empty() {
         println!("No runtime declarations found.");
         return Ok(false);
@@ -152,6 +157,31 @@ fn run_check() -> Result<bool, String> {
         }) {
             println!(
                 "{} selects Node {}",
+                declaration.source, declaration.constraint
+            );
+        }
+
+        has_issues = true;
+    }
+
+    if development_and_test_conflict(&declarations)? {
+        println!();
+        println!("DP003 Development and CI runtimes conflict");
+
+        for declaration in declarations.iter().filter(|declaration| {
+            declaration.runtime == Runtime::Node && declaration.role == Role::Development
+        }) {
+            println!(
+                "{} selects Node {}",
+                declaration.source, declaration.constraint
+            );
+        }
+
+        for declaration in declarations.iter().filter(|declaration| {
+            declaration.runtime == Runtime::Node && declaration.role == Role::Test
+        }) {
+            println!(
+                "{} tests Node {}",
                 declaration.source, declaration.constraint
             );
         }

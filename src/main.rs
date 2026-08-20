@@ -1,5 +1,6 @@
-use clap::{Parser, Subcommand};
+mod model;
 
+use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(
     name = "driftpin",
